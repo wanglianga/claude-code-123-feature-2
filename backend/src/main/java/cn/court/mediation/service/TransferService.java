@@ -30,13 +30,19 @@ public class TransferService {
     private final FollowUpRepository followUpRepository;
     private final DeliveryRepository deliveryRepository;
     private final FaceVerificationRepository faceRepository;
+    private final PaymentReminderRepository reminderRepository;
+    private final PaymentVoucherRepository voucherRepository;
+    private final OverdueVisitRepository overdueVisitRepository;
+    private final PerformanceFeedbackRepository feedbackRepository;
     private final TimelineService timelineService;
 
     public TransferService(TransferMaterialRepository transferRepository, CaseRepository caseRepository,
                            TimelineRepository timelineRepository, MediationRecordRepository recordRepository,
                            AgreementRepository agreementRepository, PerformancePlanRepository planRepository,
                            FollowUpRepository followUpRepository, DeliveryRepository deliveryRepository,
-                           FaceVerificationRepository faceRepository, TimelineService timelineService) {
+                           FaceVerificationRepository faceRepository, TimelineService timelineService,
+                           PaymentReminderRepository reminderRepository, PaymentVoucherRepository voucherRepository,
+                           OverdueVisitRepository overdueVisitRepository, PerformanceFeedbackRepository feedbackRepository) {
         this.transferRepository = transferRepository;
         this.caseRepository = caseRepository;
         this.timelineRepository = timelineRepository;
@@ -47,6 +53,10 @@ public class TransferService {
         this.deliveryRepository = deliveryRepository;
         this.faceRepository = faceRepository;
         this.timelineService = timelineService;
+        this.reminderRepository = reminderRepository;
+        this.voucherRepository = voucherRepository;
+        this.overdueVisitRepository = overdueVisitRepository;
+        this.feedbackRepository = feedbackRepository;
     }
 
     /** 生成转立案材料包 */
@@ -80,10 +90,11 @@ public class TransferService {
             materials.add("5. 调解协议及电子签署/人脸核验记录");
         }
         if (!planRepository.findByCaseIdOrderByInstallmentNo(caseId).isEmpty()) {
-            materials.add("6. 履行计划与到账/部分履行/逾期记录");
+            materials.add("6. 履行计划与到账/部分履行/逾期记录（含按期提醒、付款凭证、收款确认）");
         }
-        if (!followUpRepository.findByCaseIdOrderByFollowUpDateDesc(caseId).isEmpty()) {
-            materials.add("7. 履行回访记录");
+        if (!followUpRepository.findByCaseIdOrderByFollowUpDateDesc(caseId).isEmpty()
+                || !overdueVisitRepository.findByCaseIdOrderByVisitDateDescIdDesc(caseId).isEmpty()) {
+            materials.add("7. 履行回访、逾期回访与履行观察记录（含未付款说明/收款异议、法官助理研判）");
         }
         materials.add("8. 电子送达记录");
         if (Boolean.TRUE.equals(c.getRespondentMissing())) {
@@ -249,6 +260,83 @@ public class TransferService {
             for (FollowUp f : fus) {
                 sb.append(f.getFollowUpDate()).append(" ").append(f.getOperatorName()).append("：")
                         .append(f.getResult()).append(" ").append(nz(f.getNote())).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        List<PaymentReminder> reminders = reminderRepository.findByCaseIdOrderByPlannedDateAscIdAsc(c.getId());
+        if (!reminders.isEmpty()) {
+            sb.append("【按期履行提醒】（共").append(reminders.size()).append("条）\n");
+            for (PaymentReminder r : reminders) {
+                sb.append(r.getPlannedDate()).append(" 第")
+                        .append(r.getInstallmentNo() == null ? "—" : r.getInstallmentNo()).append("期 ")
+                        .append(switch (r.getStageType()) {
+                            case "BEFORE_DUE" -> "按期付款提醒";
+                            case "UPLOAD_VOUCHER" -> "上传付款凭证提醒";
+                            case "CONFIRM_RECEIPT" -> "确认收款提醒";
+                            case "OVERDUE_NOTICE" -> "逾期告知";
+                            default -> r.getStageType();
+                        })
+                        .append("→").append("APPLICANT".equals(r.getTargetParty()) ? "申请人" : "被申请人")
+                        .append("：").append("SENT".equals(r.getStatus()) ? "已发送" : "待发送")
+                        .append("。").append(nz(r.getContent())).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        List<PaymentVoucher> vouchers = voucherRepository.findByCaseIdOrderByCreatedAtDesc(c.getId());
+        if (!vouchers.isEmpty()) {
+            sb.append("【付款/收款凭证】（共").append(vouchers.size()).append("份）\n");
+            for (PaymentVoucher v : vouchers) {
+                sb.append("第").append(v.getInstallmentNo() == null ? "—" : v.getInstallmentNo()).append("期 ")
+                        .append(v.getFileName())
+                        .append(v.getAmount() != null ? "（金额" + v.getAmount() + "元）" : "")
+                        .append("，上传人：").append(v.getUploaderName())
+                        .append("，状态：").append(switch (v.getStatus()) {
+                            case "CONFIRMED" -> "已据此确认收款";
+                            case "REJECTED" -> "未予采信";
+                            default -> "待核实";
+                        }).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        List<OverdueVisit> visits = overdueVisitRepository.findByCaseIdOrderByVisitDateDescIdDesc(c.getId());
+        if (!visits.isEmpty()) {
+            sb.append("【逾期回访与履行观察】\n");
+            for (OverdueVisit v : visits) {
+                sb.append("— ").append(v.getVisitDate()).append(" 第").append(v.getInstallmentNo())
+                        .append("期逾期回访（").append(switch (v.getWay()) {
+                            case "ONLINE" -> "线上";
+                            case "ONSITE" -> "上门";
+                            default -> "电话";
+                        }).append("，调解员").append(v.getMediatorName()).append("）—\n");
+                sb.append("回访情况：").append(nz(v.getContent())).append("\n");
+                sb.append("履行观察期：至").append(v.getObserveUntil())
+                        .append("，随反馈重算").append(v.getRecomputeCount()).append("次，状态：")
+                        .append(switch (v.getStatus()) {
+                            case "CLOSED" -> "已结束";
+                            case "EXPIRED" -> "已届满";
+                            default -> "观察中";
+                        }).append("\n");
+                for (PerformanceFeedback f : feedbackRepository.findByVisitIdOrderByCreatedAtAsc(v.getId())) {
+                    sb.append("  · ").append("NON_PAYMENT".equals(f.getType()) ? "未付款说明" : "收款异议")
+                            .append("（").append(f.getUserName()).append("）：").append(nz(f.getContent()))
+                            .append(f.getFileName() != null ? "（附件：" + f.getFileName() + "）" : "").append("\n");
+                }
+                sb.append("法官助理研判：").append(switch (v.getDecision() == null ? "NONE" : v.getDecision()) {
+                    case "JUDICIAL_CONFIRM" -> "进入司法确认";
+                    case "EXECUTION_CLUE" -> "移交后续执行线索";
+                    case "CONTINUE_WATCH" -> "继续履行观察";
+                    default -> "待研判";
+                });
+                if (v.getExecutionClue() != null && !v.getExecutionClue().isBlank()) {
+                    sb.append("；执行线索：").append(v.getExecutionClue());
+                }
+                if (v.getDecisionNote() != null && !v.getDecisionNote().isBlank()) {
+                    sb.append("；说明：").append(v.getDecisionNote());
+                }
+                sb.append("\n");
             }
             sb.append("\n");
         }

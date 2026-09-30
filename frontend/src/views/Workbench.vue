@@ -1,7 +1,7 @@
 <template>
   <div>
-    <el-row :gutter="16">
-      <el-col :span="6" v-for="k in cards" :key="k.label">
+    <el-row :gutter="12">
+      <el-col :span="4" v-for="k in cards" :key="k.label">
         <el-card shadow="hover" class="kpi-card">
           <div class="kpi-num" :style="{ color: k.color }">{{ k.value }}</div>
           <div class="kpi-label">{{ k.label }}</div>
@@ -56,6 +56,8 @@ const buildCards = k => {
     { label: '待分流案件', value: k.pendingTriage ?? 0, color: '#f56c6c' },
     { label: '调解中案件', value: k.mediating ?? 0, color: '#409eff' },
     { label: '履行逾期', value: k.overdue ?? 0, color: '#e6a23c' },
+    { label: '履行观察中', value: k.observing ?? 0, color: '#b37feb' },
+    { label: '待核实收款凭证', value: k.pendingVoucherCount ?? 0, color: '#36cfc9' },
     { label: '在办失联', value: k.missing ?? 0, color: '#909399' }
   ]
 }

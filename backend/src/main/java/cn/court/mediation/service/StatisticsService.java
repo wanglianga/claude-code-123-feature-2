@@ -1,10 +1,14 @@
 package cn.court.mediation.service;
 
 import cn.court.mediation.entity.MediationCase;
+import cn.court.mediation.entity.OverdueVisit;
+import cn.court.mediation.entity.PaymentVoucher;
 import cn.court.mediation.entity.PerformancePlan;
 import cn.court.mediation.enums.CaseStatus;
 import cn.court.mediation.enums.CaseType;
 import cn.court.mediation.repository.CaseRepository;
+import cn.court.mediation.repository.OverdueVisitRepository;
+import cn.court.mediation.repository.PaymentVoucherRepository;
 import cn.court.mediation.repository.PerformancePlanRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,10 +23,15 @@ public class StatisticsService {
 
     private final CaseRepository caseRepository;
     private final PerformancePlanRepository planRepository;
+    private final OverdueVisitRepository visitRepository;
+    private final PaymentVoucherRepository voucherRepository;
 
-    public StatisticsService(CaseRepository caseRepository, PerformancePlanRepository planRepository) {
+    public StatisticsService(CaseRepository caseRepository, PerformancePlanRepository planRepository,
+                             OverdueVisitRepository visitRepository, PaymentVoucherRepository voucherRepository) {
         this.caseRepository = caseRepository;
         this.planRepository = planRepository;
+        this.visitRepository = visitRepository;
+        this.voucherRepository = voucherRepository;
     }
 
     @Transactional(readOnly = true)
@@ -40,6 +49,7 @@ public class StatisticsService {
         long failed = all.stream().filter(c -> c.getStatus() == CaseStatus.MEDIATION_FAILED).count();
         long transferred = all.stream().filter(c -> c.getStatus() == CaseStatus.TRANSFERRED).count();
         long overdue = all.stream().filter(c -> c.getStatus() == CaseStatus.OVERDUE).count();
+        long observing = all.stream().filter(c -> Boolean.TRUE.equals(c.getObservationActive())).count();
         long missing = all.stream().filter(c -> Boolean.TRUE.equals(c.getRespondentMissing())
                 && c.getStatus() != CaseStatus.TRANSFERRED && c.getStatus() != CaseStatus.CLOSED).count();
 
@@ -51,7 +61,9 @@ public class StatisticsService {
         kpi.put("failed", failed);
         kpi.put("transferred", transferred);
         kpi.put("overdue", overdue);
+        kpi.put("observing", observing);
         kpi.put("missing", missing);
+        kpi.put("pendingVoucherCount", voucherRepository.findByStatus("PENDING").size());
         kpi.put("successRate", total == 0 ? 0 : Math.round(success * 1000.0 / total) / 10.0);
         kpi.put("transferRate", total == 0 ? 0 : Math.round(transferred * 1000.0 / total) / 10.0);
         m.put("kpi", kpi);
@@ -100,6 +112,7 @@ public class StatisticsService {
         perf.put("paidSum", paidSum);
         perf.put("fulfillRate", dueSum.compareTo(BigDecimal.ZERO) == 0 ? 0
                 : Math.round(paidSum.doubleValue() * 1000.0 / dueSum.doubleValue()) / 10.0);
+        perf.put("pendingVoucherCount", voucherRepository.findByStatus("PENDING").size());
         m.put("performance", perf);
 
         // 转立案原因分布
@@ -128,9 +141,26 @@ public class StatisticsService {
         List<Map<String, Object>> todos = new ArrayList<>();
         LocalDate today = LocalDate.now();
 
+        // 预聚合：每案在办逾期回访、待处理反馈、待核实凭证
+        Map<Long, List<OverdueVisit>> visitsByCase = new HashMap<>();
+        for (OverdueVisit v : visitRepository.findAll()) {
+            visitsByCase.computeIfAbsent(v.getCaseId(), k -> new ArrayList<>()).add(v);
+        }
+        Map<Long, Long> pendingVoucherByCase = new HashMap<>();
+        for (PaymentVoucher v : voucherRepository.findByStatus("PENDING")) {
+            pendingVoucherByCase.merge(v.getCaseId(), 1L, Long::sum);
+        }
+
         for (MediationCase c : all) {
             String action = null;
             String tag = null;
+            List<OverdueVisit> caseVisits = visitsByCase.getOrDefault(c.getId(), List.of());
+            OverdueVisit activeVisit = caseVisits.stream()
+                    .filter(v -> "OBSERVING".equals(v.getStatus()) || "EXPIRED".equals(v.getStatus()))
+                    .findFirst().orElse(null);
+            boolean feedbackUnhandled = activeVisit != null && activeVisit.getLastFeedbackAt() != null
+                    && (activeVisit.getMediatorHandledAt() == null
+                        || activeVisit.getLastFeedbackAt().isAfter(activeVisit.getMediatorHandledAt()));
             switch (user.getRole()) {
                 case WINDOW, ADMIN -> {
                     if (c.getStatus() == CaseStatus.PENDING_TRIAGE) {
@@ -140,6 +170,8 @@ public class StatisticsService {
                         action = "转立案材料待接收"; tag = "warning";
                     } else if (Boolean.FALSE.equals(c.getEvidenceComplete())) {
                         action = "证据材料缺件跟进"; tag = "warning";
+                    } else if (Boolean.TRUE.equals(c.getObservationActive())) {
+                        action = "履行观察期案件（同步查看）"; tag = "info";
                     }
                 }
                 case MEDIATOR -> {
@@ -148,6 +180,12 @@ public class StatisticsService {
                         if (c.getStatus() == CaseStatus.SCHEDULED) { action = "已排期待调解"; tag = "primary"; }
                         if (c.getStatus() == CaseStatus.MEDIATING) { action = "调解进行中"; tag = "primary"; }
                         if (Boolean.TRUE.equals(c.getRespondentMissing())) { action = "被申请人失联，需联系"; tag = "danger"; }
+                        if (feedbackUnhandled) { action = "逾期回访后有新反馈，待决定是否继续观察"; tag = "danger"; }
+                        else if (c.getStatus() == CaseStatus.OVERDUE && activeVisit == null) {
+                            action = "某期付款逾期，可发起回访"; tag = "warning";
+                        } else if (Boolean.TRUE.equals(c.getObservationActive())) {
+                            action = "履行观察期中，跟进双方履行"; tag = "info";
+                        }
                     }
                 }
                 case PARTY -> {
@@ -155,6 +193,7 @@ public class StatisticsService {
                         if (c.getStatus() == CaseStatus.SCHEDULED) { action = "请确认出席并参加调解"; tag = "primary"; }
                         if (c.getStatus() == CaseStatus.OVERDUE) { action = "对方付款逾期，可申请转立案"; tag = "danger"; }
                         if (c.getStatus() == CaseStatus.PERFORMING) { action = "协议履行中，请关注到账"; tag = "info"; }
+                        if (Boolean.TRUE.equals(c.getObservationActive())) { action = "履行观察期，可就收款提出异议"; tag = "warning"; }
                     }
                 }
                 case ASSISTANT -> {
@@ -162,9 +201,14 @@ public class StatisticsService {
                     if (Boolean.TRUE.equals(c.getTransferRequested()) && c.getStatus() != CaseStatus.TRANSFERRED) {
                         action = "转立案材料待审核"; tag = "warning";
                     }
+                    if (activeVisit != null && "NONE".equals(activeVisit.getDecision())) {
+                        action = "逾期回访待研判：司法确认或执行线索"; tag = "danger";
+                    }
                 }
                 case EXECUTION -> {
-                    if (c.getStatus() == CaseStatus.PERFORMING || c.getStatus() == CaseStatus.OVERDUE) {
+                    if (pendingVoucherByCase.getOrDefault(c.getId(), 0L) > 0) {
+                        action = "当事人已上传付款凭证，待核实并确认收款"; tag = "warning";
+                    } else if (c.getStatus() == CaseStatus.PERFORMING || c.getStatus() == CaseStatus.OVERDUE) {
                         action = c.getStatus() == CaseStatus.OVERDUE ? "逾期履行需跟进/回访" : "分期履行跟踪回访";
                         tag = c.getStatus() == CaseStatus.OVERDUE ? "danger" : "info";
                     }

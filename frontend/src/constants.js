@@ -47,6 +47,7 @@ export const RISK_LABELS = {
   REPEAT_RESCHEDULE: '多次改期',
   INSTALLMENT: '分期履行',
   OVERDUE: '付款逾期/部分履行',
+  OBSERVING: '履行观察期',
   TRANSFER_REQUESTED: '已申请转立案'
 }
 
@@ -56,6 +57,7 @@ export const RISK_TAG = {
   REPEAT_RESCHEDULE: 'warning',
   INSTALLMENT: 'info',
   OVERDUE: 'danger',
+  OBSERVING: 'warning',
   TRANSFER_REQUESTED: 'warning'
 }
 
@@ -65,6 +67,52 @@ export const PLAN_STATUS = {
   PARTIAL: { label: '部分履行', tag: 'warning' },
   OVERDUE: { label: '已逾期', tag: 'danger' }
 }
+
+// 按期提醒环节
+export const REMIND_STAGES = {
+  BEFORE_DUE: '按期付款提醒',
+  UPLOAD_VOUCHER: '上传凭证提醒',
+  CONFIRM_RECEIPT: '确认收款提醒',
+  OVERDUE_NOTICE: '逾期告知'
+}
+export const REMIND_STAGE_TAG = {
+  BEFORE_DUE: 'primary',
+  UPLOAD_VOUCHER: 'info',
+  CONFIRM_RECEIPT: 'success',
+  OVERDUE_NOTICE: 'danger'
+}
+export const REMIND_TARGET = { APPLICANT: '申请人（收款人）', RESPONDENT: '被申请人（付款义务人）' }
+export const REMIND_CHANNEL = { SMS: '短信', ONLINE: '站内', EMAIL: '邮件' }
+
+// 凭证状态
+export const VOUCHER_STATUS = {
+  PENDING: { label: '待核实', tag: 'warning' },
+  CONFIRMED: { label: '已确认收款', tag: 'success' },
+  REJECTED: { label: '未采信', tag: 'info' }
+}
+
+// 逾期回访状态
+export const VISIT_STATUS = {
+  OBSERVING: { label: '履行观察中', tag: 'warning' },
+  EXPIRED: { label: '观察期届满', tag: 'danger' },
+  CLOSED: { label: '已结束观察', tag: 'success' }
+}
+
+// 法官助理对逾期回访的研判
+export const VISIT_DECISION = {
+  NONE: { label: '待法官助理研判', tag: 'danger' },
+  CONTINUE_WATCH: { label: '继续履行观察', tag: 'primary' },
+  JUDICIAL_CONFIRM: { label: '进入司法确认', tag: 'warning' },
+  EXECUTION_CLUE: { label: '移交执行线索', tag: 'danger' }
+}
+
+// 回访后当事人反馈类型
+export const FEEDBACK_TYPES = {
+  NON_PAYMENT: { label: '未付款说明', tag: 'warning', side: '被申请人（付款义务人）' },
+  RECEIPT_OBJECTION: { label: '收款异议', tag: 'danger', side: '申请人（收款人）' }
+}
+
+export const VISIT_WAYS = { PHONE: '电话', ONLINE: '线上', ONSITE: '上门' }
 
 export const TRANSFER_REASONS = {
   MISSING: '被申请人失联，调解无法进行',

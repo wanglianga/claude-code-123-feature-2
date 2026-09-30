@@ -32,13 +32,19 @@ public class CaseService {
     private final FollowUpRepository followUpRepository;
     private final FaceVerificationRepository faceRepository;
     private final TransferMaterialRepository transferRepository;
+    private final PaymentReminderRepository reminderRepository;
+    private final PaymentVoucherRepository voucherRepository;
+    private final OverdueVisitRepository overdueVisitRepository;
+    private final PerformanceFeedbackRepository feedbackRepository;
 
     public CaseService(CaseRepository caseRepository, UserRepository userRepository,
                        TimelineService timelineService, ScheduleRepository scheduleRepository,
                        MediationRecordRepository recordRepository, AgreementRepository agreementRepository,
                        PerformancePlanRepository planRepository, TimelineRepository timelineRepository,
                        DeliveryRepository deliveryRepository, FollowUpRepository followUpRepository,
-                       FaceVerificationRepository faceRepository, TransferMaterialRepository transferRepository) {
+                       FaceVerificationRepository faceRepository, TransferMaterialRepository transferRepository,
+                       PaymentReminderRepository reminderRepository, PaymentVoucherRepository voucherRepository,
+                       OverdueVisitRepository overdueVisitRepository, PerformanceFeedbackRepository feedbackRepository) {
         this.caseRepository = caseRepository;
         this.userRepository = userRepository;
         this.timelineService = timelineService;
@@ -51,6 +57,10 @@ public class CaseService {
         this.followUpRepository = followUpRepository;
         this.faceRepository = faceRepository;
         this.transferRepository = transferRepository;
+        this.reminderRepository = reminderRepository;
+        this.voucherRepository = voucherRepository;
+        this.overdueVisitRepository = overdueVisitRepository;
+        this.feedbackRepository = feedbackRepository;
     }
 
     @Transactional
@@ -140,12 +150,28 @@ public class CaseService {
         m.put("faceVerifications", faceRepository.findByCaseIdOrderByCreatedAtDesc(id));
         m.put("transferMaterial", transferRepository.findByCaseId(id).orElse(null));
 
+        // 分期履行跟踪：按期提醒、凭证（不含文件正文）、逾期回访+双方反馈
+        m.put("reminders", reminderRepository.findByCaseIdOrderByPlannedDateAscIdAsc(id));
+        m.put("vouchers", voucherRepository.findByCaseIdOrderByCreatedAtDesc(id).stream()
+                .peek(v -> v.setFileData(null)).toList());
+        List<Map<String, Object>> visitGroups = new ArrayList<>();
+        for (OverdueVisit v : overdueVisitRepository.findByCaseIdOrderByVisitDateDescIdDesc(id)) {
+            Map<String, Object> g = new LinkedHashMap<>();
+            g.put("visit", v);
+            g.put("feedbacks", feedbackRepository.findByVisitIdOrderByCreatedAtAsc(v.getId()));
+            visitGroups.add(g);
+        }
+        m.put("overdueVisits", visitGroups);
+        long pendingVouchers = voucherRepository.findByCaseIdAndStatusOrderByCreatedAtDesc(id, "PENDING").size();
+        m.put("pendingVoucherCount", pendingVouchers);
+
         // 风险标记汇总（供前端红黄提示）
         List<String> risks = new ArrayList<>();
         if (Boolean.TRUE.equals(c.getRespondentMissing())) risks.add("RESPONDENT_MISSING");
         if (Boolean.FALSE.equals(c.getEvidenceComplete())) risks.add("EVIDENCE_MISSING");
         if (c.getRescheduleCount() != null && c.getRescheduleCount() >= 2) risks.add("REPEAT_RESCHEDULE");
         if (Boolean.TRUE.equals(c.getTransferRequested())) risks.add("TRANSFER_REQUESTED");
+        if (Boolean.TRUE.equals(c.getObservationActive())) risks.add("OBSERVING");
         agreementRepository.findByCaseId(id).ifPresent(a -> {
             if (Boolean.TRUE.equals(a.getInstallment())) risks.add("INSTALLMENT");
         });

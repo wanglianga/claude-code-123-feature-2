@@ -43,6 +43,9 @@ public class PerformancePlan {
     @Column(length = 500)
     private String note;
 
+    /** 确认收款所依据的付款凭证 ID（当事人上传、执行联络核验收款） */
+    private Long voucherId;
+
     /** 确认人（执行联络/调解员） */
     private Long confirmedBy;
     private LocalDateTime confirmedAt = LocalDateTime.now();

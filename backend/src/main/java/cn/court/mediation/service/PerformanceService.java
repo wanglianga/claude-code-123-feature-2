@@ -3,10 +3,13 @@ package cn.court.mediation.service;
 import cn.court.mediation.common.BizException;
 import cn.court.mediation.entity.MediationAgreement;
 import cn.court.mediation.entity.MediationCase;
+import cn.court.mediation.entity.PaymentVoucher;
 import cn.court.mediation.entity.PerformancePlan;
 import cn.court.mediation.enums.CaseStatus;
 import cn.court.mediation.repository.AgreementRepository;
 import cn.court.mediation.repository.CaseRepository;
+import cn.court.mediation.repository.PaymentReminderRepository;
+import cn.court.mediation.repository.PaymentVoucherRepository;
 import cn.court.mediation.repository.PerformancePlanRepository;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -14,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -25,13 +29,21 @@ public class PerformanceService {
     private final AgreementRepository agreementRepository;
     private final CaseRepository caseRepository;
     private final TimelineService timelineService;
+    private final PaymentVoucherRepository voucherRepository;
+    private final PaymentReminderRepository reminderRepository;
+    private final InstallmentTrackingService trackingService;
 
     public PerformanceService(PerformancePlanRepository planRepository, AgreementRepository agreementRepository,
-                              CaseRepository caseRepository, TimelineService timelineService) {
+                              CaseRepository caseRepository, TimelineService timelineService,
+                              PaymentVoucherRepository voucherRepository, PaymentReminderRepository reminderRepository,
+                              InstallmentTrackingService trackingService) {
         this.planRepository = planRepository;
         this.agreementRepository = agreementRepository;
         this.caseRepository = caseRepository;
         this.timelineService = timelineService;
+        this.voucherRepository = voucherRepository;
+        this.reminderRepository = reminderRepository;
+        this.trackingService = trackingService;
     }
 
     /** 根据协议生成/重建履行节点（一次性=1期，分期按传入明细生成） */
@@ -80,11 +92,14 @@ public class PerformanceService {
         c.setStatus(CaseStatus.PERFORMING);
         caseRepository.save(c);
         timelineService.record(caseId, "PERFORMANCE", "履行付款计划已建立",
-                "共" + plans.size() + "期，首期应于" + plans.get(0).getDueDate() + "履行。", operator);
+                "共" + plans.size() + "期，首期应于" + plans.get(0).getDueDate() + "履行。平台将按期提醒付款、上传凭证并提示确认收款。", operator);
+
+        // 按每一期排定付款/上传凭证/确认收款提醒
+        trackingService.initPlanReminders(caseId, plans);
         return plans;
     }
 
-    /** 确认到账：支持全额/部分；部分履行与逾期均留痕 */
+    /** 确认到账：支持全额/部分；可依据当事人上传的付款凭证确认；部分履行与逾期均留痕 */
     @Transactional
     public PerformancePlan confirmPayment(Long planId, Map<String, Object> body, cn.court.mediation.entity.User operator) {
         PerformancePlan p = planRepository.findById(planId).orElseThrow(() -> new BizException("履行节点不存在"));
@@ -95,18 +110,41 @@ public class PerformanceService {
         String note = (String) body.getOrDefault("note", "");
         LocalDate paidDate = body.get("paidDate") != null ? LocalDate.parse(body.get("paidDate").toString()) : LocalDate.now();
 
+        // 可关联当事人上传的付款凭证
+        if (body.get("voucherId") != null && !body.get("voucherId").toString().isBlank()) {
+            Long voucherId = Long.valueOf(body.get("voucherId").toString());
+            PaymentVoucher v = voucherRepository.findById(voucherId)
+                    .orElseThrow(() -> new BizException("付款凭证不存在"));
+            if (!v.getCaseId().equals(p.getCaseId()) || (v.getPlanId() != null && !v.getPlanId().equals(planId))) {
+                throw new BizException("凭证与本期次不匹配");
+            }
+            if ("REJECTED".equals(v.getStatus())) {
+                throw new BizException("该凭证已被驳回，不能作为收款依据");
+            }
+            v.setStatus("CONFIRMED");
+            voucherRepository.save(v);
+            p.setVoucherId(voucherId);
+        }
+
         BigDecimal newTotal = (p.getPaidAmount() == null ? BigDecimal.ZERO : p.getPaidAmount()).add(paid);
         p.setPaidAmount(newTotal);
         p.setPaidDate(paidDate);
         p.setConfirmedBy(operator.getId());
+        p.setConfirmedAt(LocalDateTime.now());
         int cmp = newTotal.compareTo(p.getDueAmount());
         if (cmp >= 0) {
             p.setStatus("PAID");
         } else {
             p.setStatus("PARTIAL");
         }
-        p.setNote(note);
+        if (!note.isBlank()) {
+            p.setNote(note);
+        }
         planRepository.save(p);
+
+        // 收款已确认：该节点「确认收款提醒」闭环
+        reminderRepository.findByCaseIdAndPlanIdAndStageType(p.getCaseId(), planId, "CONFIRM_RECEIPT")
+                .forEach(r -> { if ("PLANNED".equals(r.getStatus())) { r.setStatus("SENT"); r.setSentAt(LocalDateTime.now()); reminderRepository.save(r); } });
 
         MediationCase c = caseRepository.findById(p.getCaseId()).orElseThrow();
         List<PerformancePlan> all = planRepository.findByCaseIdOrderByInstallmentNo(p.getCaseId());
@@ -120,7 +158,11 @@ public class PerformanceService {
             caseRepository.save(c);
             detail += "全部期次履行完毕。";
         }
-        timelineService.record(p.getCaseId(), "PERFORMANCE", title, detail, operator);
+        timelineService.record(p.getCaseId(), "PERFORMANCE", title, detail
+                + (p.getVoucherId() == null ? "" : "本次确认依据当事人上传的付款凭证。"), operator);
+
+        // 逾期款项全部处理后自动结束履行观察
+        trackingService.closeObservationIfResolved(p.getCaseId(), operator);
         return p;
     }
 
@@ -147,6 +189,8 @@ public class PerformanceService {
                                 p.getDueDate(), p.getDueAmount().toPlainString(), today,
                                 p.getPaidAmount() == null ? "0" : p.getPaidAmount().toPlainString()),
                         null);
+                // 发送逾期告知，并提示调解员可发起回访
+                trackingService.sendOverdueNotice(p);
             }
         }
     }

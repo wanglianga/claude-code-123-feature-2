@@ -29,13 +29,19 @@ public class DataSeeder implements CommandLineRunner {
     private final FollowUpRepository followUpRepository;
     private final DeliveryRepository deliveryRepository;
     private final TransferMaterialRepository transferRepository;
+    private final PaymentReminderRepository reminderRepository;
+    private final PaymentVoucherRepository voucherRepository;
+    private final OverdueVisitRepository overdueVisitRepository;
+    private final PerformanceFeedbackRepository feedbackRepository;
     private final TimelineService timelineService;
 
     public DataSeeder(UserRepository userRepository, CaseRepository caseRepository,
                       ScheduleRepository scheduleRepository, MediationRecordRepository recordRepository,
                       AgreementRepository agreementRepository, PerformancePlanRepository planRepository,
                       FollowUpRepository followUpRepository, DeliveryRepository deliveryRepository,
-                      TransferMaterialRepository transferRepository, TimelineService timelineService) {
+                      TransferMaterialRepository transferRepository, TimelineService timelineService,
+                      PaymentReminderRepository reminderRepository, PaymentVoucherRepository voucherRepository,
+                      OverdueVisitRepository overdueVisitRepository, PerformanceFeedbackRepository feedbackRepository) {
         this.userRepository = userRepository;
         this.caseRepository = caseRepository;
         this.scheduleRepository = scheduleRepository;
@@ -46,6 +52,10 @@ public class DataSeeder implements CommandLineRunner {
         this.deliveryRepository = deliveryRepository;
         this.transferRepository = transferRepository;
         this.timelineService = timelineService;
+        this.reminderRepository = reminderRepository;
+        this.voucherRepository = voucherRepository;
+        this.overdueVisitRepository = overdueVisitRepository;
+        this.feedbackRepository = feedbackRepository;
     }
 
     @Override
@@ -183,6 +193,30 @@ public class DataSeeder implements CommandLineRunner {
         planRepository.saveAll(java.util.List.of(p61, p62, p63));
         timelineService.record(c6.getId(), "PERFORMANCE", "第1期足额履行", "应收20000元，已全额到账。", execution);
         timelineService.record(c6.getId(), "PERFORMANCE", "第2期部分履行", "应收20000元，到账8000元，尚欠12000元，继续跟踪。", execution);
+        // 按期提醒：第1期三类提醒均已发送；第2期已发送；第3期待发送
+        reminderRepository.saveAll(java.util.List.of(
+                reminder(c6.getId(), p61, 1, "BEFORE_DUE", "RESPONDENT", p61.getDueDate().minusDays(3), "SENT", LocalDateTime.now().minusMonths(1).minusDays(2)),
+                reminder(c6.getId(), p61, 1, "UPLOAD_VOUCHER", "RESPONDENT", p61.getDueDate(), "SENT", LocalDateTime.now().minusMonths(1)),
+                reminder(c6.getId(), p61, 1, "CONFIRM_RECEIPT", "APPLICANT", p61.getDueDate(), "SENT", LocalDateTime.now().minusMonths(1)),
+                reminder(c6.getId(), p62, 2, "BEFORE_DUE", "RESPONDENT", p62.getDueDate().minusDays(3), "SENT", LocalDateTime.now().minusDays(8)),
+                reminder(c6.getId(), p62, 2, "UPLOAD_VOUCHER", "RESPONDENT", p62.getDueDate(), "SENT", LocalDateTime.now().minusDays(5)),
+                reminder(c6.getId(), p62, 2, "CONFIRM_RECEIPT", "APPLICANT", p62.getDueDate(), "SENT", LocalDateTime.now().minusDays(5)),
+                reminder(c6.getId(), p63, 3, "BEFORE_DUE", "RESPONDENT", p63.getDueDate().minusDays(3), "PLANNED", null),
+                reminder(c6.getId(), p63, 3, "UPLOAD_VOUCHER", "RESPONDENT", p63.getDueDate(), "PLANNED", null),
+                reminder(c6.getId(), p63, 3, "CONFIRM_RECEIPT", "APPLICANT", p63.getDueDate(), "PLANNED", null)));
+        // 付款凭证：第1期、第2期8000元已据此确认；被申请人又上传5000元凭证待核实收款
+        PaymentVoucher v61 = voucher(c6.getId(), p61.getId(), 1, "RESPONDENT", execution, "银行转账回单_第1期.jpg",
+                "image/jpeg", new BigDecimal("20000"), p61.getPaidDate(), "第1期转账回单", "CONFIRMED");
+        PaymentVoucher v62 = voucher(c6.getId(), p62.getId(), 2, "RESPONDENT", execution, "手机银行截图_第2期8000.png",
+                "image/png", new BigDecimal("8000"), LocalDate.now().minusDays(3), "仅凑齐8000元", "CONFIRMED");
+        PaymentVoucher v63 = voucher(c6.getId(), p62.getId(), 2, "RESPONDENT", execution, "微信转账凭证_第2期补足5000.jpg",
+                "image/jpeg", new BigDecimal("5000"), LocalDate.now().minusDays(1), "再补足5000元，尚欠7000元", "PENDING");
+        voucherRepository.saveAll(java.util.List.of(v61, v62, v63));
+        p61.setVoucherId(v61.getId());
+        p62.setVoucherId(v62.getId());
+        planRepository.saveAll(java.util.List.of(p61, p62));
+        timelineService.record(c6.getId(), "VOUCHER", "付款义务人上传付款凭证",
+                "第2期被申请人上传微信转账凭证5000元，等待执行联络核实并确认收款。", execution, v63.getFileName());
         FollowUp f6 = new FollowUp();
         f6.setCaseId(c6.getId());
         f6.setOperatorId(execution.getId());
@@ -210,6 +244,64 @@ public class DataSeeder implements CommandLineRunner {
         planRepository.save(p7);
         timelineService.record(c7.getId(), "OVERDUE", "第1期付款逾期",
                 "应于" + LocalDate.now().minusDays(10) + "支付15000元，未到账，平台预警并通知执行联络人。", null);
+        // 按期提醒与逾期告知
+        reminderRepository.saveAll(java.util.List.of(
+                reminder(c7.getId(), p7, 1, "BEFORE_DUE", "RESPONDENT", p7.getDueDate().minusDays(3), "SENT", LocalDateTime.now().minusDays(13)),
+                reminder(c7.getId(), p7, 1, "UPLOAD_VOUCHER", "RESPONDENT", p7.getDueDate(), "SENT", LocalDateTime.now().minusDays(10)),
+                reminder(c7.getId(), p7, 1, "CONFIRM_RECEIPT", "APPLICANT", p7.getDueDate(), "SENT", LocalDateTime.now().minusDays(10)),
+                reminder(c7.getId(), p7, 1, "OVERDUE_NOTICE", "RESPONDENT", LocalDate.now().minusDays(9), "SENT", LocalDateTime.now().minusDays(9))));
+        // 调解员发起逾期回访 → 进入履行观察期；双方反馈后观察期重新计算
+        c7.setObservationActive(true);
+        c7.setObserveUntil(LocalDate.now().plusDays(6));
+        c7.setObserveRecomputeCount(2);
+        caseRepository.save(c7);
+        OverdueVisit ov7 = new OverdueVisit();
+        ov7.setCaseId(c7.getId());
+        ov7.setPlanId(p7.getId());
+        ov7.setInstallmentNo(1);
+        ov7.setWay("PHONE");
+        ov7.setVisitDate(LocalDate.now().minusDays(9));
+        ov7.setContent("被申请人电话接通，称下游货款未收回导致资金紧张，承诺两周内先付5000元；其现仍在本市民生路仓库经营，有货车一辆。");
+        ov7.setMediatorId(li.getId());
+        ov7.setMediatorName("李调解员");
+        ov7.setDecision("NONE");
+        ov7.setStatus("OBSERVING");
+        ov7.setObserveDays(15);
+        ov7.setObserveUntil(LocalDate.now().plusDays(6));
+        ov7.setRecomputeCount(2);
+        ov7.setMediatorHandledAt(LocalDateTime.now().minusDays(7));
+        overdueVisitRepository.save(ov7);
+        timelineService.record(c7.getId(), "OBSERVE", "第1期逾期，调解员发起回访",
+                "电话回访，被申请人承诺两周内先付5000元。案件进入15天履行观察期，法官助理同步查看。", li);
+        PerformanceFeedback fb71 = new PerformanceFeedback();
+        fb71.setCaseId(c7.getId());
+        fb71.setVisitId(ov7.getId());
+        fb71.setType("NON_PAYMENT");
+        fb71.setUserId(li.getId());
+        fb71.setUserName("李调解员");
+        fb71.setUserRole("MEDIATOR");
+        fb71.setPartySide("RESPONDENT");
+        fb71.setContent("（回访后代被申请人登记）下游拖欠货款约8万元未收回，申请宽限15天，愿意先筹措5000元并提供应收账款凭证。");
+        fb71.setCreatedAt(LocalDateTime.now().minusDays(8));
+        feedbackRepository.save(fb71);
+        timelineService.record(c7.getId(), "FEEDBACK", "当事人提交未付款说明",
+                "被申请人说明下游货款未收回，申请宽限15天。履行观察期重新计算（第1次重算）。", li);
+        PerformanceFeedback fb72 = new PerformanceFeedback();
+        fb72.setCaseId(c7.getId());
+        fb72.setVisitId(ov7.getId());
+        fb72.setType("RECEIPT_OBJECTION");
+        fb72.setUserId(null);
+        fb72.setUserName("诚信建材经营部");
+        fb72.setUserRole("PARTY");
+        fb72.setPartySide("APPLICANT");
+        fb72.setContent("不同意无限期宽限，要求15日内至少支付5000元，否则申请司法确认并要求查控其货车与应收账款。");
+        fb72.setCreatedAt(LocalDateTime.now().minusDays(3));
+        feedbackRepository.save(fb72);
+        ov7.setLastFeedbackAt(LocalDateTime.now().minusDays(3));
+        overdueVisitRepository.save(ov7);
+        timelineService.record(c7.getId(), "FEEDBACK", "收款人提出收款异议",
+                "申请人要求15日内至少支付5000元，否则申请司法确认。履行观察期重新计算至"
+                        + ov7.getObserveUntil() + "（第2次重算），请调解员决定是否继续观察，法官助理同步研判。", null);
 
         // 8) 履行完毕
         MediationCase c8 = baseCase("TZ" + date(-40) + "008", CaseType.LOAN, CaseStatus.PERFORMED_DONE,
@@ -447,6 +539,51 @@ public class DataSeeder implements CommandLineRunner {
         p.setNote(note);
         p.setConfirmedBy(confirmedBy);
         return p;
+    }
+
+    private PaymentReminder reminder(Long caseId, PerformancePlan p, int no, String stage, String target,
+                                     LocalDate plannedDate, String status, LocalDateTime sentAt) {
+        PaymentReminder r = new PaymentReminder();
+        r.setCaseId(caseId);
+        r.setPlanId(p.getId());
+        r.setInstallmentNo(no);
+        r.setStageType(stage);
+        r.setTargetParty(target);
+        r.setChannel("SMS");
+        r.setPlannedDate(plannedDate);
+        r.setStatus(status);
+        r.setSentAt(sentAt);
+        if ("SENT".equals(status)) r.setOperatorName("系统");
+        r.setContent(switch (stage) {
+            case "BEFORE_DUE" -> "【履行提醒】第" + no + "期款项将于" + plannedDate.plusDays(stage.equals("BEFORE_DUE") ? 3 : 0) + "到期，请按时支付";
+            case "UPLOAD_VOUCHER" -> "【凭证提醒】第" + no + "期付款后请及时上传转账凭证";
+            case "CONFIRM_RECEIPT" -> "【收款提醒】第" + no + "期款项请注意查收并确认";
+            default -> "【逾期告知】第" + no + "期款项已逾期，请尽快履行，否则可能进入司法确认或执行程序";
+        });
+        return r;
+    }
+
+    private PaymentVoucher voucher(Long caseId, Long planId, int no, String side, User uploader,
+                                   String fileName, String fileType, BigDecimal amount, LocalDate paidDate,
+                                   String remark, String status) {
+        PaymentVoucher v = new PaymentVoucher();
+        v.setCaseId(caseId);
+        v.setPlanId(planId);
+        v.setInstallmentNo(no);
+        v.setPartySide(side);
+        v.setUploaderUserId(uploader.getId());
+        v.setUploaderName(uploader.getRealName());
+        v.setUploaderRole(uploader.getRole().name());
+        v.setFileName(fileName);
+        v.setFileType(fileType);
+        // 演示占位内容（非真实图片），下载接口会还原为占位文件
+        v.setFileData(java.util.Base64.getEncoder().encodeToString(
+                ("DEMO VOUCHER PLACEHOLDER: " + fileName).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        v.setAmount(amount);
+        v.setPaidDate(paidDate);
+        v.setRemark(remark);
+        v.setStatus(status);
+        return v;
     }
 
     private String date(int deltaDays) {

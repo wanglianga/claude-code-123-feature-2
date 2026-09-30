@@ -146,7 +146,8 @@ const TYPE_COLOR = {
   SUBMIT: '', TRIAGE: 'primary', SCHEDULE: 'primary', RESCHEDULE: 'warning',
   RECORD: '', AGREEMENT: 'success', SIGN: 'success', FACE: 'success',
   PERFORMANCE: 'success', OVERDUE: 'danger', FOLLOWUP: 'info', TRANSFER: 'warning',
-  DELIVERY: 'info', MISSING: 'danger', EVIDENCE: 'warning'
+  DELIVERY: 'info', MISSING: 'danger', EVIDENCE: 'warning',
+  REMIND: 'primary', VOUCHER: 'success', OBSERVE: 'warning', FEEDBACK: 'warning', DECISION: 'danger'
 }
 const typeOf = t => TYPE_COLOR[t] || ''
 

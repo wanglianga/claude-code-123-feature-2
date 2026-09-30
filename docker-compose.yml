@@ -1,0 +1,8 @@
+services:
+  mediation-platform:
+    build: .
+    image: court-mediation:latest
+    container_name: court-mediation
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

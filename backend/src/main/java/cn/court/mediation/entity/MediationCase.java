@@ -112,6 +112,17 @@ public class MediationCase {
     @Column(length = 500)
     private String lastFollowUpResult;
 
+    // ---------- 分期履行观察（逾期回访后滚动计算） ----------
+    /** 是否处于履行观察期 */
+    private Boolean observationActive = false;
+    /** 观察期截止日，收到双方反馈后重新计算 */
+    private LocalDate observeUntil;
+    /** 观察期累计重算次数 */
+    private Integer observeRecomputeCount = 0;
+    /** 法官助理对逾期研判：NONE 未研判 / JUDICIAL_CONFIRM 建议司法确认 / EXECUTION_CLUE 执行线索 / CONTINUE_WATCH 继续观察 */
+    @Column(length = 20)
+    private String overdueDecision = "NONE";
+
     private LocalDateTime createdAt = LocalDateTime.now();
     private LocalDateTime updatedAt = LocalDateTime.now();
 
