@@ -29,13 +29,18 @@ public class DataSeeder implements CommandLineRunner {
     private final FollowUpRepository followUpRepository;
     private final DeliveryRepository deliveryRepository;
     private final TransferMaterialRepository transferRepository;
+    private final PerformanceFeedbackRepository feedbackRepository;
+    private final OverdueVisitRepository visitRepository;
+    private final ExecutionClueRepository clueRepository;
     private final TimelineService timelineService;
 
     public DataSeeder(UserRepository userRepository, CaseRepository caseRepository,
                       ScheduleRepository scheduleRepository, MediationRecordRepository recordRepository,
                       AgreementRepository agreementRepository, PerformancePlanRepository planRepository,
                       FollowUpRepository followUpRepository, DeliveryRepository deliveryRepository,
-                      TransferMaterialRepository transferRepository, TimelineService timelineService) {
+                      TransferMaterialRepository transferRepository, TimelineService timelineService,
+                      PerformanceFeedbackRepository feedbackRepository, OverdueVisitRepository visitRepository,
+                      ExecutionClueRepository clueRepository) {
         this.userRepository = userRepository;
         this.caseRepository = caseRepository;
         this.scheduleRepository = scheduleRepository;
@@ -46,6 +51,9 @@ public class DataSeeder implements CommandLineRunner {
         this.deliveryRepository = deliveryRepository;
         this.transferRepository = transferRepository;
         this.timelineService = timelineService;
+        this.feedbackRepository = feedbackRepository;
+        this.visitRepository = visitRepository;
+        this.clueRepository = clueRepository;
     }
 
     @Override
@@ -332,6 +340,94 @@ public class DataSeeder implements CommandLineRunner {
         r11.setOutcome("FAIL");
         recordRepository.save(r11);
         timelineService.record(c11.getId(), "RECORD", "第1次调解笔录", "被申请人拒绝调解，调解终结。", li);
+
+        // 13) 分期逾期→调解员回访→双方反馈→履行观察期（观察期随反馈重算），法官助理同步查看
+        MediationCase c13 = baseCase("TZ" + date(-15) + "013", CaseType.LOAN, CaseStatus.OBSERVING,
+                Urgency.NORMAL, "林秀英", "13811110013", null, "曾还款", "13911110013",
+                "本市朝阳路66号", false, new BigDecimal("30000"), "借款3万元分3期，第2期逾期",
+                "借条;银行转账记录;还款承诺书", true);
+        c13.setWindowUserId(window.getId());
+        c13.setMediatorId(zhang.getId());
+        c13.setChannel(Channel.ONLINE);
+        c13.setObservationUntil(LocalDate.now().plusDays(5));
+        caseRepository.save(c13);
+        seedAgreementFlow(c13, zhang, window, execution, new BigDecimal("30000"), true,
+                "分3期，每期10000元", LocalDate.now().plusMonths(1), null);
+        PerformancePlan p131 = plan(c13.getId(), 1, new BigDecimal("10000"), LocalDate.now().minusMonths(1),
+                "PAID", new BigDecimal("10000"), LocalDate.now().minusMonths(1).plusDays(1), "首期已到账", execution.getId());
+        p131.setReminded(true);
+        PerformancePlan p132 = plan(c13.getId(), 2, new BigDecimal("10000"), LocalDate.now().minusDays(8),
+                "OVERDUE", new BigDecimal("0"), null, "第2期到期未付，已发起逾期回访", execution.getId());
+        p132.setReminded(true);
+        PerformancePlan p133 = plan(c13.getId(), 3, new BigDecimal("10000"), LocalDate.now().plusMonths(1),
+                "PENDING", BigDecimal.ZERO, null, null, null);
+        p133.setReminded(true);
+        planRepository.saveAll(java.util.List.of(p131, p132, p133));
+        timelineService.record(c13.getId(), "PERFORMANCE", "第2期付款到期提醒",
+                "平台按期提醒第2期应于" + LocalDate.now().minusDays(8) + "支付10000元并上传凭证。", null);
+        timelineService.record(c13.getId(), "OVERDUE", "第2期付款逾期",
+                "第2期10000元到期未足额到账，平台预警，调解员发起逾期回访。", null);
+
+        OverdueVisit v13 = new OverdueVisit();
+        v13.setCaseId(c13.getId());
+        v13.setPlanId(p132.getId());
+        v13.setInstallmentNo(2);
+        v13.setMediatorId(zhang.getId());
+        v13.setMediatorName("张调解员");
+        v13.setVisitDate(LocalDate.now().minusDays(6));
+        v13.setWay("PHONE");
+        v13.setNote("电话联系到被申请人，称工程款回款延迟，请求宽限并承诺尽快补足第2期");
+        v13.setSuggestion("CONTINUE_OBSERVE");
+        v13.setStatus("OBSERVING");
+        v13.setCreatedAt(LocalDateTime.now().minusDays(6));
+        visitRepository.save(v13);
+        c13.setObservationVisitId(v13.getId());
+        caseRepository.save(c13);
+        timelineService.record(c13.getId(), "OVERDUE", "调解员发起逾期回访",
+                "电话回访，被申请人称资金周转困难，承诺尽快补足第2期。", zhang);
+        timelineService.record(c13.getId(), "OVERDUE", "转入履行观察期",
+                "调解员根据双方反馈决定继续履行观察，观察期至" + LocalDate.now().plusDays(5) + "。", zhang);
+
+        PerformanceFeedback fb1 = new PerformanceFeedback();
+        fb1.setCaseId(c13.getId());
+        fb1.setPlanId(p131.getId());
+        fb1.setSubmitterId(li.getId());
+        fb1.setSubmitterName("曾还款");
+        fb1.setSubmitterSide("RESPONDENT");
+        fb1.setType("PAYMENT_VOUCHER");
+        fb1.setAmount(new BigDecimal("10000"));
+        fb1.setContent("第1期已通过手机银行转账（转账回单已线下核验）");
+        fb1.setStatus("ACKNOWLEDGED");
+        fb1.setCreatedAt(LocalDateTime.now().minusMonths(1));
+        feedbackRepository.save(fb1);
+
+        PerformanceFeedback fb2 = new PerformanceFeedback();
+        fb2.setCaseId(c13.getId());
+        fb2.setPlanId(p132.getId());
+        fb2.setVisitId(v13.getId());
+        fb2.setSubmitterId(li.getId());
+        fb2.setSubmitterName("曾还款");
+        fb2.setSubmitterSide("RESPONDENT");
+        fb2.setType("NONPAYMENT_EXPLANATION");
+        fb2.setContent("工程款尚未结算，预计本周到账后立即补足第2期10000元，申请继续宽限");
+        fb2.setStatus("SUBMITTED");
+        fb2.setCreatedAt(LocalDateTime.now().minusDays(3));
+        feedbackRepository.save(fb2);
+        timelineService.record(c13.getId(), "OVERDUE", "履行观察期重新计算",
+                "收到未付款说明，履行观察期自反馈之日重新计算，延长至" + LocalDate.now().plusDays(5) + "。", null);
+
+        ExecutionClue cl13 = new ExecutionClue();
+        cl13.setCaseId(c13.getId());
+        cl13.setVisitId(v13.getId());
+        cl13.setCreatedBy(assistant.getId());
+        cl13.setCreatedByName("孙法官助理");
+        cl13.setClueType("INCOME");
+        cl13.setContent("被申请人在本区承包小型装修工程，有持续性工程款收入，可供后续执行");
+        cl13.setRoute("PENDING");
+        cl13.setStatus("OPEN");
+        clueRepository.save(cl13);
+        timelineService.record(c13.getId(), "TRANSFER", "登记后续执行线索",
+                "法官助理同步查看回访后预登记收入线索，观察期届满仍未履行的移送执行。", assistant);
     }
 
     /** 协议起草→双方人脸核验→线上签署 的完整留痕 */

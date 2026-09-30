@@ -16,6 +16,7 @@ public enum CaseStatus {
     PERFORMING("履行中"),
     PERFORMED_DONE("履行完毕"),
     OVERDUE("履行逾期"),
+    OBSERVING("履行观察期"),
     TRANSFERRED("已转立案"),
     CLOSED("已归档");
 

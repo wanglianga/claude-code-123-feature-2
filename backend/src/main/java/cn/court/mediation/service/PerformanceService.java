@@ -117,6 +117,8 @@ public class PerformanceService {
                 cmp >= 0 ? "本期已结清。" : "尚欠" + p.getDueAmount().subtract(newTotal).toPlainString() + "元，继续跟踪。");
         if (allPaid) {
             c.setStatus(CaseStatus.PERFORMED_DONE);
+            c.setObservationUntil(null);
+            c.setObservationVisitId(null);
             caseRepository.save(c);
             detail += "全部期次履行完毕。";
         }
@@ -135,15 +137,19 @@ public class PerformanceService {
         List<PerformancePlan> overdue = planRepository.findByStatusAndDueDateBefore("PENDING", today);
         overdue.addAll(planRepository.findByStatusAndDueDateBefore("PARTIAL", today));
         for (PerformancePlan p : overdue) {
+            MediationCase c = caseRepository.findById(p.getCaseId()).orElse(null);
+            // 履行观察期内不重复置逾期、不改案件状态，由观察期届满扫描统一处理
+            if (c != null && c.getStatus() == CaseStatus.OBSERVING) {
+                continue;
+            }
             p.setStatus("OVERDUE");
             planRepository.save(p);
-            MediationCase c = caseRepository.findById(p.getCaseId()).orElse(null);
             if (c != null && c.getStatus() != CaseStatus.TRANSFERRED && c.getStatus() != CaseStatus.CLOSED) {
                 c.setStatus(CaseStatus.OVERDUE);
                 caseRepository.save(c);
                 timelineService.record(p.getCaseId(), "OVERDUE",
                         "第" + p.getInstallmentNo() + "期付款逾期",
-                        String.format("应于%s支付%s元，截至%s未足额到账（已付%s元），平台自动预警并通知执行联络人。",
+                        String.format("应于%s支付%s元，截至%s未足额到账（已付%s元），平台自动预警并通知调解员/执行联络人，可发起逾期回访。",
                                 p.getDueDate(), p.getDueAmount().toPlainString(), today,
                                 p.getPaidAmount() == null ? "0" : p.getPaidAmount().toPlainString()),
                         null);

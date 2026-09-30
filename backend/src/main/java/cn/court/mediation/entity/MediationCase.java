@@ -112,6 +112,12 @@ public class MediationCase {
     @Column(length = 500)
     private String lastFollowUpResult;
 
+    // ---------- 履行观察期 ----------
+    /** 逾期回访后，调解员决定继续履行观察的截止日；期间随当事人反馈重新计算 */
+    private LocalDate observationUntil;
+    /** 观察期由哪次逾期回访发起 */
+    private Long observationVisitId;
+
     private LocalDateTime createdAt = LocalDateTime.now();
     private LocalDateTime updatedAt = LocalDateTime.now();
 

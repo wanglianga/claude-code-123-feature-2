@@ -1,0 +1,25 @@
+services:
+  mediation-platform:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: court-mediation-platform:latest
+    container_name: court-mediation-platform
+    ports:
+      - "8080:8080"
+    volumes:
+      # 持久化付款凭证/异议材料附件；默认使用 H2 内存库，无需数据库容器
+      - mediation-attachments:/app/data/attachments
+    environment:
+      # 默认 H2 内存库零配置；如需接 MySQL，见 README 并改用 mysql profile
+      JAVA_OPTS: "-Xms256m -Xmx512m"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:8080/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  mediation-attachments:

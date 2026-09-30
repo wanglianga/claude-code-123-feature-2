@@ -15,6 +15,9 @@ public interface CaseRepository extends JpaRepository<MediationCase, Long> {
 
     List<MediationCase> findByStatusIn(List<CaseStatus> statuses);
 
+    /** 履行观察期届满扫描 */
+    List<MediationCase> findByStatusAndObservationUntilBefore(CaseStatus status, java.time.LocalDate date);
+
     List<MediationCase> findByMediatorId(Long mediatorId);
 
     List<MediationCase> findByApplicantUserId(Long applicantUserId);

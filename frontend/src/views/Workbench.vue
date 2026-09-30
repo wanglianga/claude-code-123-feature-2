@@ -1,7 +1,7 @@
 <template>
   <div>
     <el-row :gutter="16">
-      <el-col :span="6" v-for="k in cards" :key="k.label">
+      <el-col :span="4" v-for="k in cards" :key="k.label">
         <el-card shadow="hover" class="kpi-card">
           <div class="kpi-num" :style="{ color: k.color }">{{ k.value }}</div>
           <div class="kpi-label">{{ k.label }}</div>
@@ -51,12 +51,15 @@ const todos = ref([])
 const kpi = ref({})
 
 const cards = ref([])
-const buildCards = k => {
+const buildCards = d => {
+  const k = d.kpi
   cards.value = [
     { label: '待分流案件', value: k.pendingTriage ?? 0, color: '#f56c6c' },
     { label: '调解中案件', value: k.mediating ?? 0, color: '#409eff' },
     { label: '履行逾期', value: k.overdue ?? 0, color: '#e6a23c' },
-    { label: '在办失联', value: k.missing ?? 0, color: '#909399' }
+    { label: '履行观察期', value: k.observing ?? 0, color: '#b37feb' },
+    { label: '在办失联', value: k.missing ?? 0, color: '#909399' },
+    { label: '待跟进执行线索', value: d.risks?.openExecutionClues ?? 0, color: '#f56c6c' }
   ]
 }
 
@@ -65,7 +68,7 @@ const load = async () => {
   todos.value = data.todos
   const d = await api.get('/dashboard')
   kpi.value = d.kpi
-  buildCards(d.kpi)
+  buildCards(d)
 }
 onMounted(load)
 </script>

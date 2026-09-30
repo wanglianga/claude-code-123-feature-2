@@ -30,13 +30,18 @@ public class TransferService {
     private final FollowUpRepository followUpRepository;
     private final DeliveryRepository deliveryRepository;
     private final FaceVerificationRepository faceRepository;
+    private final PerformanceFeedbackRepository feedbackRepository;
+    private final OverdueVisitRepository visitRepository;
+    private final ExecutionClueRepository clueRepository;
     private final TimelineService timelineService;
 
     public TransferService(TransferMaterialRepository transferRepository, CaseRepository caseRepository,
                            TimelineRepository timelineRepository, MediationRecordRepository recordRepository,
                            AgreementRepository agreementRepository, PerformancePlanRepository planRepository,
                            FollowUpRepository followUpRepository, DeliveryRepository deliveryRepository,
-                           FaceVerificationRepository faceRepository, TimelineService timelineService) {
+                           FaceVerificationRepository faceRepository, TimelineService timelineService,
+                           PerformanceFeedbackRepository feedbackRepository, OverdueVisitRepository visitRepository,
+                           ExecutionClueRepository clueRepository) {
         this.transferRepository = transferRepository;
         this.caseRepository = caseRepository;
         this.timelineRepository = timelineRepository;
@@ -47,6 +52,9 @@ public class TransferService {
         this.deliveryRepository = deliveryRepository;
         this.faceRepository = faceRepository;
         this.timelineService = timelineService;
+        this.feedbackRepository = feedbackRepository;
+        this.visitRepository = visitRepository;
+        this.clueRepository = clueRepository;
     }
 
     /** 生成转立案材料包 */
@@ -85,11 +93,18 @@ public class TransferService {
         if (!followUpRepository.findByCaseIdOrderByFollowUpDateDesc(caseId).isEmpty()) {
             materials.add("7. 履行回访记录");
         }
-        materials.add("8. 电子送达记录");
-        if (Boolean.TRUE.equals(c.getRespondentMissing())) {
-            materials.add("9. 被申请人失联情况说明及联系过程记录");
+        if (!feedbackRepository.findByCaseIdOrderByCreatedAtDesc(caseId).isEmpty()
+                || !visitRepository.findByCaseIdOrderByCreatedAtDesc(caseId).isEmpty()) {
+            materials.add("8. 付款凭证/未付款说明/收款异议、逾期回访与履行观察记录");
         }
-        materials.add("10. 转立案审批表");
+        if (!clueRepository.findByCaseIdOrderByCreatedAtDesc(caseId).isEmpty()) {
+            materials.add("9. 后续执行线索记录");
+        }
+        materials.add("10. 电子送达记录");
+        if (Boolean.TRUE.equals(c.getRespondentMissing())) {
+            materials.add("11. 被申请人失联情况说明及联系过程记录");
+        }
+        materials.add("12. 转立案审批表");
         tm.setMaterialList(materials.toString());
         tm.setCompiledContent(buildCompiledDossier(c, reasonType, reasonDetail, events));
         transferRepository.save(tm);
@@ -249,6 +264,53 @@ public class TransferService {
             for (FollowUp f : fus) {
                 sb.append(f.getFollowUpDate()).append(" ").append(f.getOperatorName()).append("：")
                         .append(f.getResult()).append(" ").append(nz(f.getNote())).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        List<PerformanceFeedback> fbs = feedbackRepository.findByCaseIdOrderByCreatedAtDesc(c.getId());
+        if (!fbs.isEmpty()) {
+            sb.append("【履行反馈（付款凭证/未付款说明/收款异议）】\n");
+            for (PerformanceFeedback f : fbs) {
+                sb.append(f.getCreatedAt().toLocalDate()).append(" ")
+                        .append("APPLICANT".equals(f.getSubmitterSide()) ? "申请人" : "被申请人")
+                        .append(f.getSubmitterName() == null ? "" : "（" + f.getSubmitterName() + "）")
+                        .append(switch (f.getType()) {
+                            case "PAYMENT_VOUCHER" -> " 付款凭证";
+                            case "NONPAYMENT_EXPLANATION" -> " 未付款说明";
+                            case "RECEIPT_OBJECTION" -> " 收款异议";
+                            default -> " 履行反馈";
+                        })
+                        .append(f.getAmount() == null ? "" : " " + f.getAmount() + "元")
+                        .append("：").append(nz(f.getContent()))
+                        .append(f.getAttachmentName() == null ? "" : "（附件：" + f.getAttachmentName() + "）")
+                        .append("\n");
+            }
+            sb.append("\n");
+        }
+
+        List<OverdueVisit> visits = visitRepository.findByCaseIdOrderByCreatedAtDesc(c.getId());
+        if (!visits.isEmpty()) {
+            sb.append("【逾期回访与履行观察】\n");
+            for (OverdueVisit v : visits) {
+                sb.append(v.getVisitDate()).append(" ").append(nz(v.getMediatorName()))
+                        .append(" 第").append(v.getInstallmentNo() == null ? "—" : v.getInstallmentNo()).append("期逾期回访")
+                        .append("，状态：").append(nz(v.getStatus())).append("\n")
+                        .append("  联系情况：").append(nz(v.getNote())).append("\n");
+                if (v.getAssistantOpinion() != null && !v.getAssistantOpinion().isBlank()) {
+                    sb.append("  法官助理意见：").append(v.getAssistantOpinion()).append("\n");
+                }
+            }
+            sb.append("\n");
+        }
+
+        List<ExecutionClue> clues = clueRepository.findByCaseIdOrderByCreatedAtDesc(c.getId());
+        if (!clues.isEmpty()) {
+            sb.append("【后续执行线索】\n");
+            for (ExecutionClue cl : clues) {
+                sb.append(cl.getCreatedAt().toLocalDate()).append(" ").append(nz(cl.getCreatedByName()))
+                        .append("：").append(nz(cl.getContent()))
+                        .append("（状态：").append(nz(cl.getStatus())).append("）\n");
             }
             sb.append("\n");
         }

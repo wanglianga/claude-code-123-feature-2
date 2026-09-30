@@ -43,6 +43,10 @@ public class PerformancePlan {
     @Column(length = 500)
     private String note;
 
+    /** 平台按期提醒（到期前/到期当日）是否已发送 */
+    private Boolean reminded = false;
+    private LocalDateTime remindedAt;
+
     /** 确认人（执行联络/调解员） */
     private Long confirmedBy;
     private LocalDateTime confirmedAt = LocalDateTime.now();

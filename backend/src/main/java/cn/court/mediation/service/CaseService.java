@@ -32,13 +32,18 @@ public class CaseService {
     private final FollowUpRepository followUpRepository;
     private final FaceVerificationRepository faceRepository;
     private final TransferMaterialRepository transferRepository;
+    private final PerformanceFeedbackRepository feedbackRepository;
+    private final OverdueVisitRepository visitRepository;
+    private final ExecutionClueRepository clueRepository;
 
     public CaseService(CaseRepository caseRepository, UserRepository userRepository,
                        TimelineService timelineService, ScheduleRepository scheduleRepository,
                        MediationRecordRepository recordRepository, AgreementRepository agreementRepository,
                        PerformancePlanRepository planRepository, TimelineRepository timelineRepository,
                        DeliveryRepository deliveryRepository, FollowUpRepository followUpRepository,
-                       FaceVerificationRepository faceRepository, TransferMaterialRepository transferRepository) {
+                       FaceVerificationRepository faceRepository, TransferMaterialRepository transferRepository,
+                       PerformanceFeedbackRepository feedbackRepository, OverdueVisitRepository visitRepository,
+                       ExecutionClueRepository clueRepository) {
         this.caseRepository = caseRepository;
         this.userRepository = userRepository;
         this.timelineService = timelineService;
@@ -51,6 +56,9 @@ public class CaseService {
         this.followUpRepository = followUpRepository;
         this.faceRepository = faceRepository;
         this.transferRepository = transferRepository;
+        this.feedbackRepository = feedbackRepository;
+        this.visitRepository = visitRepository;
+        this.clueRepository = clueRepository;
     }
 
     @Transactional
@@ -139,6 +147,9 @@ public class CaseService {
         m.put("followUps", followUpRepository.findByCaseIdOrderByFollowUpDateDesc(id));
         m.put("faceVerifications", faceRepository.findByCaseIdOrderByCreatedAtDesc(id));
         m.put("transferMaterial", transferRepository.findByCaseId(id).orElse(null));
+        m.put("feedbacks", feedbackRepository.findByCaseIdOrderByCreatedAtDesc(id));
+        m.put("overdueVisits", visitRepository.findByCaseIdOrderByCreatedAtDesc(id));
+        m.put("executionClues", clueRepository.findByCaseIdOrderByCreatedAtDesc(id));
 
         // 风险标记汇总（供前端红黄提示）
         List<String> risks = new ArrayList<>();
@@ -153,6 +164,7 @@ public class CaseService {
                 .anyMatch(p -> "OVERDUE".equals(p.getStatus()) || "PARTIAL".equals(p.getStatus()))) {
             risks.add("OVERDUE");
         }
+        if (c.getStatus() == CaseStatus.OBSERVING) risks.add("OBSERVING");
         m.put("risks", risks);
         return m;
     }

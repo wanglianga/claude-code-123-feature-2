@@ -39,6 +39,13 @@ app:
   jwt:
     # 演示用固定令牌头，生产环境应替换为真正的 JWT 签名
     secret: court-mediation-demo-secret-key-0123456789
+  upload:
+    # 付款凭证/异议材料附件本地存储目录（演示环境）
+    dir: ./data/attachments
+  performance:
+    # 到期前 N 天开始按期提醒；履行观察期默认天数（随当事人反馈重新计算）
+    remind-days: 3
+    observe-days: 7
 
 ---
 # MySQL profile：mvn spring-boot:run -Dspring-boot.run.profiles=mysql

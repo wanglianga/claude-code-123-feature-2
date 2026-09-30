@@ -1,7 +1,7 @@
 <template>
   <div v-if="d">
     <el-row :gutter="12">
-      <el-col :span="4" v-for="k in kpis" :key="k.l">
+      <el-col :span="3" v-for="k in kpis" :key="k.l">
         <el-card shadow="hover" class="kpi">
           <div class="n" :style="{ color: k.c }">{{ k.v }}</div>
           <div class="l">{{ k.l }}</div>
@@ -81,7 +81,9 @@ const kpis = computed(() => {
     { l: '调解中', v: k.mediating, c: '#409eff' },
     { l: '调解成功率', v: k.successRate + '%', c: '#67c23a' },
     { l: '转立案率', v: k.transferRate + '%', c: '#e6a23c' },
-    { l: '履行逾期', v: k.overdue, c: '#f56c6c' }
+    { l: '履行逾期', v: k.overdue, c: '#f56c6c' },
+    { l: '履行观察期', v: k.observing ?? 0, c: '#b37feb' },
+    { l: '待跟进线索', v: d.value.risks?.openExecutionClues ?? 0, c: '#f56c6c' }
   ]
 })
 const fmtMoney = v => Number(v || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })
